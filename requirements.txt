@@ -1,0 +1,5 @@
+click>=8.0.0
+uuid
+pathlib
+pytest>=7.0.0
+pytest-asyncio>=0.21.0

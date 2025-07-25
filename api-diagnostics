@@ -1,0 +1,17 @@
+#!/usr/bin/env python3
+
+"""
+CLI Entry Point for API Diagnostics Tool
+"""
+
+import sys
+from pathlib import Path
+
+# Add src directory to Python path
+src_path = Path(__file__).parent / 'src'
+sys.path.insert(0, str(src_path))
+
+from commands import cli
+
+if __name__ == '__main__':
+    cli()
