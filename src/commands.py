@@ -18,7 +18,7 @@ def cli():
 def init(project_path):
     """Initialize API diagnostics in a project"""
     import json
-    from integrations import detect_project
+    from integrations import detect_project, setup_integration
 
     project_dir = Path(project_path)
 
@@ -61,9 +61,23 @@ def init(project_path):
     config_file = config_dir / 'config.json'
     config_file.write_text(json.dumps(config_content, indent=2))
 
+    # Generate integration code if frameworks detected
+    if project_info:
+        click.echo("🔧 Generating integration code...")
+        try:
+            files_created = setup_integration(project_info, project_path)
+            click.echo("   Generated files:")
+            for file_path in files_created:
+                click.echo(f"   - {file_path}")
+        except Exception as e:
+            click.echo(f"   ⚠️  Error generating code: {e}")
+
     click.echo(f'✅ Initialized API diagnostics in {project_path}')
     click.echo(f'   Created: {config_dir}')
     click.echo(f'   Config: {config_file}')
+
+    if project_info:
+        click.echo(f'   📖 See .api-diagnostics/generated/INTEGRATION.md for setup instructions')
 
 
 @cli.command()
@@ -109,10 +123,50 @@ def stop():
 
 @cli.command()
 @click.argument('correlation_id')
-def search(correlation_id):
+@click.option('--format', 'output_format', default='human', type=click.Choice(['human', 'json', 'compact']), help='Output format')
+@click.option('--logs', help='Comma-separated list of log file paths to search')
+def search(correlation_id, output_format, logs):
     """Search logs by correlation ID"""
-    # TODO: Search logs by correlation ID
-    click.echo(f'Searching for correlation ID: {correlation_id}')
+    from core import search_logs_by_correlation_id, format_log_entry, validate_correlation_id
+
+    # Validate correlation ID format
+    if not validate_correlation_id(correlation_id):
+        # Try to find partial matches if it's not a full UUID
+        if len(correlation_id) < 8:
+            click.echo(f"⚠️  Correlation ID too short. Please provide at least 8 characters.")
+            return
+
+    # Parse log paths if provided
+    log_paths = None
+    if logs:
+        log_paths = [path.strip() for path in logs.split(',')]
+
+    click.echo(f'🔍 Searching for correlation ID: {correlation_id}')
+    if log_paths:
+        click.echo(f'   Log files: {", ".join(log_paths)}')
+    else:
+        click.echo('   Searching default log locations...')
+
+    # Search for entries
+    entries = search_logs_by_correlation_id(correlation_id, log_paths)
+
+    if not entries:
+        click.echo('❌ No log entries found with that correlation ID')
+        click.echo('\n💡 Tips:')
+        click.echo('   - Make sure your application is logging with correlation IDs')
+        click.echo('   - Check if log files exist in the current directory')
+        click.echo('   - Try searching with just the first 8 characters of the ID')
+        return
+
+    click.echo(f'\n✅ Found {len(entries)} log entries:')
+    click.echo('=' * 60)
+
+    for i, entry in enumerate(entries, 1):
+        formatted = format_log_entry(entry, output_format)
+        click.echo(f'\n[{i}] {formatted}')
+
+        if i < len(entries):
+            click.echo('-' * 40)
 
 
 @cli.command()
@@ -137,10 +191,92 @@ def status():
 
 
 @cli.command()
+@click.option('--type', 'error_type', default='error', type=click.Choice(['400', '500', 'error']), help='Error type to search for')
+@click.option('--format', 'output_format', default='human', type=click.Choice(['human', 'json', 'compact']), help='Output format')
+@click.option('--limit', default=20, help='Maximum number of entries to show')
+@click.option('--logs', help='Comma-separated list of log file paths to search')
+def errors(error_type, output_format, limit, logs):
+    """Search logs for error entries"""
+    from core import search_logs_by_error_type, format_log_entry
+
+    # Parse log paths if provided
+    log_paths = None
+    if logs:
+        log_paths = [path.strip() for path in logs.split(',')]
+
+    click.echo(f'🔍 Searching for {error_type} errors (limit: {limit})')
+    if log_paths:
+        click.echo(f'   Log files: {", ".join(log_paths)}')
+    else:
+        click.echo('   Searching default log locations...')
+
+    # Search for error entries
+    entries = search_logs_by_error_type(error_type, log_paths, limit)
+
+    if not entries:
+        click.echo(f'❌ No {error_type} errors found in logs')
+        return
+
+    click.echo(f'\n✅ Found {len(entries)} error entries:')
+    click.echo('=' * 60)
+
+    for i, entry in enumerate(entries, 1):
+        formatted = format_log_entry(entry, output_format)
+        click.echo(f'\n[{i}] {formatted}')
+
+        if i < len(entries):
+            click.echo('-' * 40)
+
+
+@cli.command()
+@click.option('--hours', default=24, help='Number of hours to look back')
+@click.option('--format', 'output_format', default='compact', type=click.Choice(['human', 'json', 'compact']), help='Output format')
+@click.option('--limit', default=50, help='Maximum number of entries to show')
+@click.option('--logs', help='Comma-separated list of log file paths to search')
+def recent(hours, output_format, limit, logs):
+    """Show recent log entries"""
+    from core import search_logs_recent, format_log_entry
+
+    # Parse log paths if provided
+    log_paths = None
+    if logs:
+        log_paths = [path.strip() for path in logs.split(',')]
+
+    click.echo(f'🔍 Searching for entries from the last {hours} hours (limit: {limit})')
+    if log_paths:
+        click.echo(f'   Log files: {", ".join(log_paths)}')
+    else:
+        click.echo('   Searching default log locations...')
+
+    # Search for recent entries
+    entries = search_logs_recent(hours, log_paths, limit)
+
+    if not entries:
+        click.echo('❌ No recent log entries found')
+        return
+
+    click.echo(f'\n✅ Found {len(entries)} recent entries:')
+    click.echo('=' * 60)
+
+    for i, entry in enumerate(entries, 1):
+        formatted = format_log_entry(entry, output_format)
+        click.echo(f'\n[{i}] {formatted}')
+
+        if i < len(entries):
+            click.echo('-' * 40)
+
+
+@cli.command()
 def clean():
     """Remove all integration code"""
-    # TODO: Remove all integration code
-    click.echo('Cleaning up integration...')
+    from integrations import remove_integration
+
+    click.echo('🧹 Cleaning up API diagnostics integration...')
+    try:
+        remove_integration('.')
+        click.echo('✅ Integration removed successfully')
+    except Exception as e:
+        click.echo(f'❌ Error removing integration: {e}')
 
 
 if __name__ == '__main__':
