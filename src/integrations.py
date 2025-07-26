@@ -13,64 +13,98 @@ from dataclasses import dataclass
 @dataclass
 class ProjectInfo:
     type: str  # 'frontend', 'backend', 'fullstack'
-    frontend: Optional[str] = None  # 'react', 'vue', 'angular', 'vanilla'
-    backend: Optional[str] = None   # 'fastapi', 'express', 'django', 'flask'
-    package_manager: str = 'pip'    # 'pip', 'npm', 'yarn', 'pnpm'
+    frontend: Optional[str] = None  # 'react' only
+    backend: Optional[str] = None   # 'fastapi', 'flask'
+    package_manager: str = 'pip'    # 'pip', 'npm'
 
 
-class ProjectDetector:
-    @staticmethod
-    def detect_project(project_path: str = '.') -> Optional[ProjectInfo]:
-        """Analyze project structure and detect frameworks"""
-        # TODO: Analyze package.json/requirements.txt and project structure
-        # TODO: Detect frontend framework
-        # TODO: Detect backend framework
-        # TODO: Determine package manager
+def detect_frontend_framework(project_path: str) -> Optional[str]:
+    """Check for React framework in package.json"""
+    package_json_path = Path(project_path) / 'package.json'
+
+    if not package_json_path.exists():
         return None
 
-    @staticmethod
-    def detect_frontend_framework(project_path: str) -> Optional[str]:
-        """Check for frontend framework indicators"""
-        # TODO: Check package.json dependencies for React, Vue, etc.
-        package_json_path = Path(project_path) / 'package.json'
-        if package_json_path.exists():
-            try:
-                with open(package_json_path) as f:
-                    package_data = json.load(f)
-                    dependencies = {**package_data.get('dependencies', {}),
-                                  **package_data.get('devDependencies', {})}
+    try:
+        with open(package_json_path) as f:
+            package_data = json.load(f)
 
-                    if 'react' in dependencies:
-                        return 'react'
-                    elif 'vue' in dependencies:
-                        return 'vue'
-                    elif '@angular/core' in dependencies:
-                        return 'angular'
-            except (json.JSONDecodeError, FileNotFoundError):
-                pass
+        # Combine regular and dev dependencies
+        dependencies = {
+            **package_data.get('dependencies', {}),
+            **package_data.get('devDependencies', {})
+        }
+
+        # Check for React (most common indicators)
+        if any(dep in dependencies for dep in ['react', 'react-dom', '@types/react']):
+            return 'react'
+
+    except (json.JSONDecodeError, FileNotFoundError, KeyError):
+        pass
+
+    return None
+
+
+def detect_backend_framework(project_path: str) -> Optional[str]:
+    """Check for FastAPI or Flask in Python files"""
+    project_dir = Path(project_path)
+
+    # Check for Python files with framework imports
+    for py_file in project_dir.rglob('*.py'):
+        try:
+            with open(py_file, 'r', encoding='utf-8') as f:
+                content = f.read()
+
+            # Check for FastAPI first (more specific)
+            if any(pattern in content for pattern in [
+                'from fastapi import',
+                'import fastapi',
+                'FastAPI()',
+                '@app.get',
+                '@app.post'
+            ]):
+                return 'fastapi'
+
+            # Check for Flask
+            elif any(pattern in content for pattern in [
+                'from flask import',
+                'import flask',
+                'Flask(__name__)',
+                '@app.route'
+            ]):
+                return 'flask'
+
+        except (UnicodeDecodeError, PermissionError, OSError):
+            continue
+
+    return None
+
+
+def detect_project(project_path: str = '.') -> Optional[ProjectInfo]:
+    """Detect project type and frameworks"""
+    frontend = detect_frontend_framework(project_path)
+    backend = detect_backend_framework(project_path)
+
+    if not frontend and not backend:
         return None
 
-    @staticmethod
-    def detect_backend_framework(project_path: str) -> Optional[str]:
-        """Check for backend framework indicators"""
-        # TODO: Check for FastAPI, Django, Flask files
-        project_dir = Path(project_path)
+    # Determine project type
+    if frontend and backend:
+        project_type = 'fullstack'
+    elif frontend:
+        project_type = 'frontend'
+    else:
+        project_type = 'backend'
 
-        # Check for Python files with framework imports
-        for py_file in project_dir.rglob('*.py'):
-            try:
-                with open(py_file) as f:
-                    content = f.read()
-                    if 'from fastapi' in content or 'import fastapi' in content:
-                        return 'fastapi'
-                    elif 'from flask' in content or 'import flask' in content:
-                        return 'flask'
-                    elif 'from django' in content or 'import django' in content:
-                        return 'django'
-            except (UnicodeDecodeError, PermissionError):
-                continue
+    # Determine package manager
+    package_manager = 'npm' if frontend else 'pip'
 
-        return None
+    return ProjectInfo(
+        type=project_type,
+        frontend=frontend,
+        backend=backend,
+        package_manager=package_manager
+    )
 
 
 class ProjectConfigurator:
