@@ -15,10 +15,11 @@ def cli():
 
 @cli.command()
 @click.argument('project_path', default='.')
-def init(project_path):
+@click.option('--auto', is_flag=True, help='Automatically inject code into project files')
+def init(project_path, auto):
     """Initialize API diagnostics in a project"""
     import json
-    from integrations import detect_project, setup_integration
+    from integrations import detect_project, setup_integration, setup_integration_automatically
 
     project_dir = Path(project_path)
 
@@ -44,7 +45,7 @@ def init(project_path):
 
     # Create config directory
     config_dir = project_dir / '.api-diagnostics'
-    config_dir.mkdir(exist_ok=True)  # Creates directory, doesn't fail if exists
+    config_dir.mkdir(exist_ok=True)
 
     # Create config file with detected info
     config_content = {
@@ -61,22 +62,56 @@ def init(project_path):
     config_file = config_dir / 'config.json'
     config_file.write_text(json.dumps(config_content, indent=2))
 
-    # Generate integration code if frameworks detected
+    # Setup integration (automatic or manual)
     if project_info:
-        click.echo("🔧 Generating integration code...")
-        try:
-            files_created = setup_integration(project_info, project_path)
-            click.echo("   Generated files:")
-            for file_path in files_created:
-                click.echo(f"   - {file_path}")
-        except Exception as e:
-            click.echo(f"   ⚠️  Error generating code: {e}")
+        if auto:
+            click.echo("🚀 Setting up automatic integration...")
+            try:
+                results = setup_integration_automatically(project_info, project_path)
 
-    click.echo(f'✅ Initialized API diagnostics in {project_path}')
+                if results['success']:
+                    click.echo("✅ Automatic integration complete!")
+
+                    if results['files_created']:
+                        click.echo("   Files created:")
+                        for file_path in results['files_created']:
+                            click.echo(f"   + {file_path}")
+
+                    if results['files_modified']:
+                        click.echo("   Files modified:")
+                        for file_path in results['files_modified']:
+                            click.echo(f"   ~ {file_path}")
+
+                    click.echo("\n🎉 Your project is ready!")
+                    click.echo("   Run `api-diagnostics start` to enable monitoring")
+                    click.echo("   Then start your app and make API calls")
+                    click.echo("   Check browser console for correlation IDs")
+                else:
+                    click.echo("❌ Automatic integration failed:")
+                    for error in results['errors']:
+                        click.echo(f"   Error: {error}")
+                    click.echo("   Falling back to manual setup...")
+                    auto = False
+            except Exception as e:
+                click.echo(f"❌ Automatic integration failed: {e}")
+                click.echo("   Falling back to manual setup...")
+                auto = False
+
+        if not auto:
+            click.echo("🔧 Generating integration templates...")
+            try:
+                files_created = setup_integration(project_info, project_path, auto_inject=False)
+                click.echo("   Generated files:")
+                for file_path in files_created:
+                    click.echo(f"   - {file_path}")
+            except Exception as e:
+                click.echo(f"   ⚠️  Error generating code: {e}")
+
+    click.echo(f'\n✅ Initialized API diagnostics in {project_path}')
     click.echo(f'   Created: {config_dir}')
     click.echo(f'   Config: {config_file}')
 
-    if project_info:
+    if project_info and not auto:
         click.echo(f'   📖 See .api-diagnostics/generated/INTEGRATION.md for setup instructions')
 
 
@@ -269,12 +304,28 @@ def recent(hours, output_format, limit, logs):
 @cli.command()
 def clean():
     """Remove all integration code"""
-    from integrations import remove_integration
+    from integrations import remove_integration_automatically
 
     click.echo('🧹 Cleaning up API diagnostics integration...')
     try:
-        remove_integration('.')
-        click.echo('✅ Integration removed successfully')
+        results = remove_integration_automatically('.')
+
+        if results['success']:
+            click.echo('✅ Integration removed successfully')
+
+            if results['files_restored']:
+                click.echo('   Files restored:')
+                for file_path in results['files_restored']:
+                    click.echo(f'   ~ {file_path}')
+
+            if results['files_removed']:
+                click.echo('   Files/directories removed:')
+                for file_path in results['files_removed']:
+                    click.echo(f'   - {file_path}')
+        else:
+            click.echo('❌ Some errors occurred during cleanup:')
+            for error in results['errors']:
+                click.echo(f'   Error: {error}')
     except Exception as e:
         click.echo(f'❌ Error removing integration: {e}')
 
